@@ -3,145 +3,90 @@ from pdf2docx import Converter
 from docx import Document
 import pytesseract
 from PIL import Image
-import os
-import tempfile
+import os, tempfile
 from pdf2image import convert_from_path
 
-# 1. Cấu hình trang
-st.set_page_config(page_title="Học Liệu Số - Chuyển Đổi Pro", layout="wide")
+# Cấu hình giao diện Neon thu gọn
+st.set_page_config(page_title="Học Liệu Số Pro", layout="wide")
 
-# 2. Định nghĩa CSS để tạo giao diện Neon như ảnh mẫu
 st.markdown("""
     <style>
-    /* Màu nền tổng thể */
-    .stApp {
-        background-color: #00162b;
-        color: #e0f2fe;
-    }
-    
-    /* Container chính với viền phát sáng */
+    .stApp { background-color: #000b14; color: #00d4ff; }
     .main-box {
-        border: 2px solid #00d4ff;
-        border-radius: 15px;
-        padding: 20px;
-        box-shadow: 0 0 15px #00d4ff;
-        background-color: rgba(0, 40, 80, 0.5);
-        margin-bottom: 20px;
+        border: 1px solid #00d4ff; border-radius: 10px;
+        padding: 10px; background-color: rgba(0, 20, 40, 0.8);
+        box-shadow: 0 0 8px #00d4ff;
     }
-    
-    /* Tiêu đề phong cách Cyberpunk */
-    .header-title {
-        text-align: center;
-        color: #00d4ff;
-        font-family: 'Segoe UI', sans-serif;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        border: 2px solid #00d4ff;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: inset 0 0 10px #00d4ff;
-        margin-bottom: 30px;
-    }
-
-    /* Các nút bấm tùy chỉnh */
-    .stButton>button {
-        background-color: transparent;
-        color: #00d4ff;
-        border: 1px solid #00d4ff;
-        border-radius: 5px;
-        transition: all 0.3s;
-    }
-    .stButton>button:hover {
-        background-color: #00d4ff;
-        color: #00162b;
-        box-shadow: 0 0 20px #00d4ff;
-    }
-
-    /* Tabs tùy chỉnh */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 24px;
-        background-color: transparent;
-    }
-    .stTabs [data-baseweb="tab"] {
-        color: #00d4ff;
-        font-weight: bold;
-    }
+    .stButton>button { width: 100%; border: 1px solid #00d4ff; background: transparent; color: #00d4ff; }
+    .stButton>button:hover { background: #00d4ff; color: #000; box-shadow: 0 0 15px #00d4ff; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- GIAO DIỆN HEADER ---
-st.markdown('<div class="header-title"><h1>CHUYỂN ĐỔI TÀI LIỆU SỐ</h1><p style="color:#00d4ff; font-size:14px;">Tiện ích được tạo bởi "Học liệu số"</p></div>', unsafe_allow_html=True)
+# Hàm hỗ trợ phân tách khoảng trang (Ví dụ: "1-50" -> start=0, end=50)
+def parse_pages(range_str):
+    try:
+        if "-" in range_str:
+            s, e = map(int, range_str.split("-"))
+            return s - 1, e
+        return int(range_str) - 1, int(range_str)
+    except:
+        return 0, None
 
-# --- CHIA CỘT CHÍNH ---
-col_left, col_right = st.columns([1, 1.5])
+st.markdown('<div style="border: 1px solid #00d4ff; padding: 5px; text-align: center; border-radius: 5px; margin-bottom: 10px;">'
+            '<h2 style="margin:0; color:#00d4ff;">🚀 CHUYỂN ĐỔI THEO PHÂN ĐOẠN</h2></div>', unsafe_allow_html=True)
 
-with col_left:
+c1, c2 = st.columns([1, 1])
+
+with c1:
     st.markdown('<div class="main-box">', unsafe_allow_html=True)
-    st.subheader("🛠️ BẢNG ĐIỀU KHIỂN")
-    
-    tab_type = st.radio("Chọn loại tài liệu:", ["📄 PDF", "🖼️ Ảnh (OCR)"])
-    
-    if tab_type == "📄 PDF":
-        pdf_file = st.file_uploader("Tải lên PDF:", type="pdf")
-        is_scan = st.toggle("Chế độ quét ảnh (Scan/OCR)", value=False)
-    else:
-        img_files = st.file_uploader("Tải lên một hoặc nhiều ảnh:", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-    
+    st.write("📂 **CÀI ĐẶT**")
+    f = st.file_uploader("Tải lên PDF", type="pdf", label_visibility="collapsed")
+    is_ocr = st.toggle("Chế độ quét ảnh (OCR Scan)", value=False)
+    pg_input = st.text_input("Nhập trang cần lấy (Ví dụ: 1-50 hoặc 5)", help="Để trống để chuyển toàn bộ")
     st.markdown('</div>', unsafe_allow_html=True)
 
-with col_right:
-    st.markdown('<div class="main-box" style="min-height: 400px;">', unsafe_allow_html=True)
-    st.subheader("🔍 KẾT QUẢ XỬ LÝ")
+with c2:
+    st.markdown('<div class="main-box">', unsafe_allow_html=True)
+    st.write("⚡ **TRẠNG THÁI**")
     
-    if tab_type == "📄 PDF" and pdf_file:
-        st.write(f"Đang chờ lệnh cho: **{pdf_file.name}**")
-        if st.button("BẮT ĐẦU CHUYỂN ĐỔI PDF"):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(pdf_file.getvalue())
-                tmp_path = tmp.name
+    if f:
+        if st.button("BẮT ĐẦU TRÍCH XUẤT"):
+            start, end = parse_pages(pg_input)
+            out_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
             
-            output_docx = tmp_path.replace(".pdf", ".docx")
             try:
-                with st.spinner("Hệ thống đang xử lý..."):
-                    if not is_scan:
-                        cv = Converter(tmp_path)
-                        cv.convert(output_docx)
-                        cv.close()
-                    else:
-                        images = convert_from_path(tmp_path)
-                        doc = Document()
-                        for i, image in enumerate(images):
-                            text = pytesseract.image_to_string(image, lang='vie')
-                            doc.add_paragraph(text)
-                            doc.add_page_break()
-                        doc.save(output_docx)
-                
-                st.success("Hoàn tất chuyển đổi!")
-                with open(output_docx, "rb") as f:
-                    st.download_button("📥 TẢI FILE WORD VỀ MÁY", f, file_name=pdf_file.name.replace(".pdf", ".docx"))
-            except Exception as e:
-                st.error(f"Lỗi hệ thống: {str(e)}")
-            finally:
-                if os.path.exists(tmp_path): os.remove(tmp_path)
-    
-    elif tab_type == "🖼️ Ảnh (OCR)" and img_files:
-        st.write(f"Số lượng ảnh đã chọn: {len(img_files)}")
-        if st.button("QUÉT OCR VÀ KẾT XUẤT"):
-            doc = Document()
-            with st.spinner("Đang đọc chữ từ ảnh..."):
-                for img_file in img_files:
-                    text = pytesseract.image_to_string(Image.open(img_file), lang='vie')
-                    doc.add_paragraph(text)
-                    doc.add_page_break()
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-                    doc.save(tmp.name)
-                    with open(tmp.name, "rb") as f:
-                        st.download_button("📥 TẢI FILE WORD ĐÃ QUÉT", f, file_name="Ket_qua_OCR.docx")
-    else:
-        st.info("👉 Hãy tải tệp tin ở cột bên trái để bắt đầu xử lý nội dung chi tiết.")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                    tmp.write(f.getvalue())
+                    tmp_p = tmp.name
 
-# --- FOOTER ---
-st.markdown('<div style="text-align:center; border: 1px solid #00d4ff; padding:10px; border-radius:5px; margin-top:20px; font-size:12px;">Dữ liệu hỗ trợ chuyển đổi chuyên nghiệp - THCS Lê Thánh Tôn</div>', unsafe_allow_html=True)
+                if not is_ocr:
+                    # Chế độ thông thường: Dùng start/end của pdf2docx
+                    with st.spinner(f"Đang chuyển trang {start+1} đến {end if end else 'hết'}..."):
+                        cv = Converter(tmp_p)
+                        cv.convert(out_file, start=start, end=end)
+                        cv.close()
+                else:
+                    # Chế độ OCR: Dùng first_page/last_page của pdf2image
+                    with st.spinner("Đang quét OCR từng trang..."):
+                        # Giảm DPI xuống 150 để tiết kiệm RAM cho file lớn
+                        imgs = convert_from_path(tmp_p, dpi=150, first_page=start+1, last_page=end)
+                        doc = Document()
+                        progress_bar = st.progress(0)
+                        for i, img in enumerate(imgs):
+                            txt = pytesseract.image_to_string(img, lang='vie')
+                            doc.add_paragraph(f"--- TRANG {start + i + 1} ---")
+                            doc.add_paragraph(txt)
+                            progress_bar.progress((i + 1) / len(imgs))
+                        doc.save(out_file)
+                
+                st.success("Đã hoàn thành phân đoạn!")
+                with open(out_file, "rb") as dl:
+                    st.download_button("📥 TẢI ĐOẠN VĂN BẢN NÀY", dl, file_name=f"Trang_{pg_input}.docx")
+                
+                os.remove(tmp_p)
+                os.remove(out_file)
+            except Exception as e:
+                st.error("Lỗi: Kiểm tra lại số trang hoặc dung lượng file.")
+    else:
+        st.info("Chưa có file nào được tải lên.")
+    st.markdown('</div>', unsafe_allow_html=True)
