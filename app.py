@@ -5,49 +5,77 @@ import pytesseract
 from PIL import Image
 import os
 import tempfile
+from pdf2image import convert_from_path
 
-# Cấu hình giao diện
-st.set_page_config(page_title="Chuyển đổi tài liệu chuyên nghiệp", layout="wide")
+st.set_page_config(page_title="Document Pro - Chuyên xử lý file Scan", page_icon="📄", layout="wide")
 
-st.title("📄 Tiện ích chuyển đổi PDF & Ảnh sang Word")
-st.markdown("Hỗ trợ file lớn trên 100 trang, giữ nguyên bố cục và tối ưu chính tả Tiếng Việt.")
+# Sidebar hướng dẫn
+with st.sidebar:
+    st.title("💡 Lưu ý quan trọng")
+    st.warning("""
+    **Nếu file Word bị biến thành ảnh:**
+    Hãy gạt nút **'Chế độ Scan (OCR)'** bên dưới phần tải file. 
+    Hệ thống sẽ dùng AI để 'đọc' chữ từ ảnh cho bạn.
+    """)
+    st.write("---")
+    st.write("📧 admin@thcslethanhton.edu.vn")
 
-tab1, tab2 = st.tabs(["Chuyển PDF sang Word", "Chuyển Ảnh sang Word"])
+st.title("🚀 Chuyển đổi PDF & Ảnh sang Word (Bản Pro)")
 
-# --- XỬ LÝ PDF ---
+tab1, tab2 = st.tabs(["📄 Chuyển PDF sang Word", "🖼️ Chuyển Ảnh sang Word"])
+
 with tab1:
-    pdf_file = st.file_uploader("Kéo thả file PDF vào đây", type="pdf")
+    pdf_file = st.file_uploader("Tải file PDF của bạn", type="pdf")
+    
+    # Nút gạt quan trọng nhất để xử lý file của bạn
+    is_scan = st.toggle("Đây là file PDF dạng ảnh quét (Scan) - Cần dùng OCR để lấy chữ", value=False)
+    
     if pdf_file:
-        if st.button("🚀 Bắt đầu chuyển PDF"):
+        if st.button("🚀 Bắt đầu xử lý PDF"):
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
                 tmp.write(pdf_file.getvalue())
                 tmp_path = tmp.name
             
-            output_path = tmp_path.replace(".pdf", ".docx")
-            with st.spinner("Đang phân tích bố cục và chuyển đổi..."):
-                cv = Converter(tmp_path)
-                cv.convert(output_path)
-                cv.close()
-            
-            with open(output_path, "rb") as f:
-                st.download_button("📥 Tải file Word về máy", f, file_name=pdf_file.name.replace(".pdf", ".docx"))
-            os.remove(tmp_path)
+            output_docx = tmp_path.replace(".pdf", ".docx")
 
-# --- XỬ LÝ ẢNH (OCR) ---
+            try:
+                if not is_scan:
+                    # Chế độ thông thường: Giữ bố cục tốt cho file PDF có văn bản thật
+                    with st.spinner("Đang tái tạo bố cục..."):
+                        cv = Converter(tmp_path)
+                        cv.convert(output_docx)
+                        cv.close()
+                else:
+                    # Chế độ Scan (OCR): Dành cho file SGK 50MB của bạn
+                    with st.spinner("Đang dùng OCR để đọc từng trang sách (có thể mất vài phút)..."):
+                        images = convert_from_path(tmp_path)
+                        doc = Document()
+                        for i, image in enumerate(images):
+                            text = pytesseract.image_to_string(image, lang='vie')
+                            doc.add_paragraph(f"--- TRANG {i+1} ---")
+                            doc.add_paragraph(text)
+                            doc.add_page_break()
+                        doc.save(output_docx)
+
+                st.success("✅ Đã xử lý xong!")
+                with open(output_docx, "rb") as f:
+                    st.download_button("📥 Tải file Word về máy", f, file_name=pdf_file.name.replace(".pdf", ".docx"))
+            
+            except Exception as e:
+                st.error(f"Lỗi: {str(e)}")
+            finally:
+                if os.path.exists(tmp_path): os.remove(tmp_path)
+
+# --- TAB 2 giữ nguyên logic cũ nhưng tối ưu giao diện ---
 with tab2:
-    img_files = st.file_uploader("Chọn một hoặc nhiều ảnh", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
-    if img_files:
-        if st.button("🔍 Quét OCR Tiếng Việt"):
-            doc = Document()
-            with st.spinner("Đang nhận diện chữ từ ảnh..."):
-                for img_file in img_files:
-                    img = Image.open(img_file)
-                    # Nhận diện chữ Tiếng Việt
-                    text = pytesseract.image_to_string(img, lang='vie')
-                    doc.add_paragraph(text)
-                    doc.add_page_break()
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
-                    doc.save(tmp.name)
-                    with open(tmp.name, "rb") as f:
-                        st.download_button("📥 Tải file Word đã quét", f, file_name="Chuyển_đổi_ảnh.docx")
+    img_files = st.file_uploader("Chọn ảnh", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
+    if img_files and st.button("🔍 Quét chữ từ ảnh"):
+        doc = Document()
+        for img_file in img_files:
+            text = pytesseract.image_to_string(Image.open(img_file), lang='vie')
+            doc.add_paragraph(text)
+            doc.add_page_break()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as tmp:
+            doc.save(tmp.name)
+            with open(tmp.name, "rb") as f:
+                st.download_button("📥 Tải file Word kết quả", f, file_name="Ket_qua_OCR.docx")
