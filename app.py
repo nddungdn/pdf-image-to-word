@@ -3,90 +3,100 @@ from pdf2docx import Converter
 from docx import Document
 import pytesseract
 from PIL import Image
-import os, tempfile
+import os, tempfile, gc
 from pdf2image import convert_from_path
 
-# Cấu hình giao diện Neon thu gọn
 st.set_page_config(page_title="Học Liệu Số Pro", layout="wide")
 
+# CSS tối giản giao diện trong 1 màn hình
 st.markdown("""
     <style>
-    .stApp { background-color: #000b14; color: #00d4ff; }
+    .stApp { background-color: #000b14; color: #00d4ff; font-size: 14px; }
     .main-box {
-        border: 1px solid #00d4ff; border-radius: 10px;
-        padding: 10px; background-color: rgba(0, 20, 40, 0.8);
-        box-shadow: 0 0 8px #00d4ff;
+        border: 1px solid #00d4ff; border-radius: 8px;
+        padding: 15px; background-color: rgba(0, 20, 40, 0.9);
+        box-shadow: 0 0 10px #00d4ff;
     }
-    .stButton>button { width: 100%; border: 1px solid #00d4ff; background: transparent; color: #00d4ff; }
-    .stButton>button:hover { background: #00d4ff; color: #000; box-shadow: 0 0 15px #00d4ff; }
+    .stButton>button { width: 100%; border: 1px solid #00d4ff; background: transparent; color: #00d4ff; font-weight: bold; }
+    .stButton>button:hover { background: #00d4ff; color: #000; box-shadow: 0 0 20px #00d4ff; }
+    input, .stTextInput>div>div>input { background-color: #001a33 !important; color: #00d4ff !important; border: 1px solid #00d4ff !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# Hàm hỗ trợ phân tách khoảng trang (Ví dụ: "1-50" -> start=0, end=50)
-def parse_pages(range_str):
-    try:
-        if "-" in range_str:
-            s, e = map(int, range_str.split("-"))
-            return s - 1, e
-        return int(range_str) - 1, int(range_str)
-    except:
-        return 0, None
+st.markdown('<h2 style="text-align:center; color:#00d4ff; border: 1px solid #00d4ff; padding:10px; border-radius:10px;">🚀 HỆ THỐNG CHUYỂN ĐỔI HỌC LIỆU SỐ</h2>', unsafe_allow_html=True)
 
-st.markdown('<div style="border: 1px solid #00d4ff; padding: 5px; text-align: center; border-radius: 5px; margin-bottom: 10px;">'
-            '<h2 style="margin:0; color:#00d4ff;">🚀 CHUYỂN ĐỔI THEO PHÂN ĐOẠN</h2></div>', unsafe_allow_html=True)
+# Chia cột để tất cả nằm trong 1 màn hình
+col1, col2 = st.columns([1, 1.2])
 
-c1, c2 = st.columns([1, 1])
-
-with c1:
+with col1:
     st.markdown('<div class="main-box">', unsafe_allow_html=True)
-    st.write("📂 **CÀI ĐẶT**")
-    f = st.file_uploader("Tải lên PDF", type="pdf", label_visibility="collapsed")
-    is_ocr = st.toggle("Chế độ quét ảnh (OCR Scan)", value=False)
-    pg_input = st.text_input("Nhập trang cần lấy (Ví dụ: 1-50 hoặc 5)", help="Để trống để chuyển toàn bộ")
+    st.markdown("### 📥 ĐẦU VÀO")
+    mode = st.radio("Chế độ xử lý:", ["PDF sang Word", "Ảnh sang Word (OCR)"], horizontal=True)
+    
+    if mode == "PDF sang Word":
+        file_upload = st.file_uploader("Chọn file PDF:", type="pdf")
+        is_ocr = st.toggle("Chế độ Scan (OCR) - Dùng cho sách quét", value=False)
+        pages = st.text_input("Khoảng trang cần lấy (VD: 1-20):", "")
+    else:
+        file_upload = st.file_uploader("Chọn các ảnh:", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-with c2:
-    st.markdown('<div class="main-box">', unsafe_allow_html=True)
-    st.write("⚡ **TRẠNG THÁI**")
+with col2:
+    st.markdown('<div class="main-box" style="min-height:350px;">', unsafe_allow_html=True)
+    st.markdown("### ⚡ TRẠNG THÁI & KẾT QUẢ")
     
-    if f:
+    if file_upload:
         if st.button("BẮT ĐẦU TRÍCH XUẤT"):
-            start, end = parse_pages(pg_input)
-            out_file = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
-            
+            out_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
             try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                    tmp.write(f.getvalue())
-                    tmp_p = tmp.name
+                # Phân tích trang
+                p_start, p_end = 0, None
+                if mode == "PDF sang Word" and pages.strip():
+                    if "-" in pages:
+                        s, e = map(int, pages.split("-"))
+                        p_start, p_end = s-1, e
+                    else:
+                        p_start, p_end = int(pages)-1, int(pages)
 
-                if not is_ocr:
-                    # Chế độ thông thường: Dùng start/end của pdf2docx
-                    with st.spinner(f"Đang chuyển trang {start+1} đến {end if end else 'hết'}..."):
-                        cv = Converter(tmp_p)
-                        cv.convert(out_file, start=start, end=end)
-                        cv.close()
-                else:
-                    # Chế độ OCR: Dùng first_page/last_page của pdf2image
-                    with st.spinner("Đang quét OCR từng trang..."):
-                        # Giảm DPI xuống 150 để tiết kiệm RAM cho file lớn
-                        imgs = convert_from_path(tmp_p, dpi=150, first_page=start+1, last_page=end)
+                with st.spinner("Đang xử lý dữ liệu..."):
+                    if mode == "PDF sang Word":
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+                            tmp_pdf.write(file_upload.getvalue())
+                            tmp_pdf_p = tmp_pdf.name
+                        
+                        if not is_ocr:
+                            cv = Converter(tmp_pdf_p)
+                            cv.convert(out_path, start=p_start, end=p_end)
+                            cv.close()
+                        else:
+                            # Tối ưu RAM cho file 50MB: Giảm DPI xuống 150
+                            imgs = convert_from_path(tmp_pdf_p, dpi=150, first_page=p_start+1, last_page=p_end)
+                            doc = Document()
+                            progress_bar = st.progress(0)
+                            for i, img in enumerate(imgs):
+                                txt = pytesseract.image_to_string(img, lang='vie')
+                                doc.add_paragraph(f"--- TRANG {p_start + i + 1} ---")
+                                doc.add_paragraph(txt)
+                                progress_bar.progress((i + 1) / len(imgs))
+                                del img # Giải phóng RAM ngay lập tức
+                            doc.save(out_path)
+                        os.remove(tmp_pdf_p)
+                    else:
                         doc = Document()
-                        progress_bar = st.progress(0)
-                        for i, img in enumerate(imgs):
-                            txt = pytesseract.image_to_string(img, lang='vie')
-                            doc.add_paragraph(f"--- TRANG {start + i + 1} ---")
+                        for img_file in file_upload:
+                            txt = pytesseract.image_to_string(Image.open(img_file), lang='vie')
                             doc.add_paragraph(txt)
-                            progress_bar.progress((i + 1) / len(imgs))
-                        doc.save(out_file)
-                
-                st.success("Đã hoàn thành phân đoạn!")
-                with open(out_file, "rb") as dl:
-                    st.download_button("📥 TẢI ĐOẠN VĂN BẢN NÀY", dl, file_name=f"Trang_{pg_input}.docx")
-                
-                os.remove(tmp_p)
-                os.remove(out_file)
+                        doc.save(out_path)
+
+                st.success("✅ Thành công! Hãy tải file bên dưới:")
+                with open(out_path, "rb") as f:
+                    st.download_button("📥 TẢI FILE WORD VỀ MÁY", f, file_name=f"Ket_qua.docx")
+                os.remove(out_path)
+                gc.collect() # Thu dọn rác bộ nhớ
             except Exception as e:
-                st.error("Lỗi: Kiểm tra lại số trang hoặc dung lượng file.")
+                st.error(f"Lỗi: {str(e)}")
+                st.info("Mẹo: Với file nặng > 50MB, hãy chia nhỏ khoảng trang (VD: 1-15) để tránh lỗi 'Oh no'.")
     else:
-        st.info("Chưa có file nào được tải lên.")
+        st.write("---")
+        st.write("👉 Hãy tải file ở bên trái để bắt đầu.")
     st.markdown('</div>', unsafe_allow_html=True)
