@@ -3,3 +3,4 @@ pdf2docx
 pytesseract
 Pillow
 python-docx
+pdf2image
